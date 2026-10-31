@@ -1,0 +1,9 @@
+{
+  "name": "shadow-reapers-target-finder",
+  "private": true,
+  "type": "module",
+  "description": "Torn PDA / desktop userscript: tap TF to open your next matching target.",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}
