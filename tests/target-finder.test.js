@@ -58,7 +58,7 @@ async function fixture({ kind = 'pda', store = {}, respond, page = '/index.php',
       getTargetButton: () => targetButton, getPopup: () => root.children.find(n => n.className === 'toast'), getKeyStatus: () => keyStatus.textContent,
       getKeyInput: () => keyInput, getConsent: () => consent, getRemember: () => remember,
       scanID, selectedStats, ready, stop, keepPool, rememberTarget, logReport, logEvent, flushLogs,
-      getLogPanel: () => logPanel, getLogHint: () => logHint.textContent, getLogText: () => logText };
+      getLogPanel: () => logPanel, getLogHint: () => logHint.textContent, getLogText: () => logText, getLogIdentity: () => logIdentity };
     globalThis.started = start();
   })();`);
   assert.notEqual(instrumented, source); vm.runInNewContext(instrumented, context); await context.started; await settle();
@@ -240,7 +240,7 @@ test('update metadata points to the main-branch script in this repository with a
   const download = new URL(metadata.downloadurl);
   assert.equal(metadata.name, 'Shadow Reapers Target Finder');
   assert.equal(metadata.namespace, 'https://shadowreapersfaction.com');
-  assert.equal(metadata.version, '0.5.0');
+  assert.equal(metadata.version, '0.5.1');
   assert.equal(download.href, 'https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js');
   assert.equal(metadata.updateurl, download.href);
   assert.equal(download.search, '');
@@ -1464,7 +1464,7 @@ for (const kind of ['pda', 'gm']) test(kind + ': WAIT logs persist across pages 
   await reload.click('Logs'); await reload.click('Copy logs');
   assert.equal(reload.requests.length, 0); assert.equal(reload.navigations.length, 0);
   assert.match(copied, /Torn throttle\/block/); assert.match(copied, /HTTP 429 code 5/);
-  assert.match(copied, /seconds remaining/); assert.match(copied, /TF v0.5.0/);
+  assert.match(copied, /seconds remaining/); assert.match(copied, /TF v0.5.1/);
   assert.ok(!copied.includes(TEST_KEY)); assert.equal(reload.h.getPanel().hidden, true);
   await reload.click('Close logs'); assert.equal(reload.h.getLogPanel().hidden, true);
   reload.advance(63000); await reload.click('Logs'); assert.match(reload.h.logReport(), /WAIT has expired/);
@@ -1658,7 +1658,7 @@ test('errors carry a fixed detail label in stored and copied logs, never the fre
   assert.equal(error.detail, 'opened history full');
   assert.match(f.h.logReport(), /error operation: opened history full/);
   assert.equal(f.h.logEvent('error', { detail: 'Player 123 secret text' }).detail, undefined, 'Unknown details are dropped');
-  assert.match(f.h.logReport(), /^TF v0\.5\.0 diagnostics/);
+  assert.match(f.h.logReport(), /^TF v0.5.1 diagnostics/);
 });
 
 test('v0.4.2 defaults to most-likely-available order, including once for existing installs', async () => {
@@ -1787,4 +1787,58 @@ test('once a fresh list is used up, three more misses can request another, at mo
   const summary = JSON.parse(f.store[LOG_STORE]).findLast(e => e.kind === 'summary');
   assert.equal(summary.counts.earlyBatches, 3, 'At most three early lists; later lists only refill an empty queue');
   assert.ok(lists >= 3);
+});
+
+const UPLOAD = 'https://shadowreapersfaction.com/api/public/script-logs';
+const uploadResponder = reply => (url, body) => url.hostname === 'shadowreapersfaction.com' ? reply(body)
+  : url.hostname === 'ffscouter.com' ? { targets: [raw()] } : torn(Number(url.pathname.split('/').pop()) || 999, { name: 'Reaper_9' });
+
+for (const kind of ['pda', 'gm']) test(kind + ': Send to leadership uploads only the report; name and ID only when ticked; never the key', async () => {
+  const f = await fixture({ kind, respond: uploadResponder(() => ({ status: 201, responseText: JSON.stringify({ id: 12 }) })) });
+  await f.connect(true);
+  assert.equal(f.h.getState().ownerName, 'Reaper_9');
+  const before = f.requests.length;
+  await f.click('Send to leadership');
+  assert.equal(f.requests.length, before + 1, 'exactly one upload, no Torn or FFScouter calls');
+  const post = f.posts.at(-1);
+  assert.equal(post.url.href, UPLOAD);
+  assert.deepEqual(Object.keys(post.body).sort(), ['log', 'note', 'script']);
+  assert.equal(post.body.script, 'target-finder'); assert.match(post.body.log, /^TF v0\.5\.1 diagnostics/);
+  assert.ok(!JSON.stringify(post.body).includes(TEST_KEY)); assert.ok(!post.url.search);
+  assert.match(f.h.getLogHint(), /log #12/);
+  f.h.getLogIdentity().checked = true;
+  await f.click('Send to leadership');
+  assert.deepEqual(f.posts.at(-1).body.sender, { id: 999, name: 'Reaper_9' });
+  assert.ok(!JSON.stringify(f.posts.at(-1)).includes(TEST_KEY));
+});
+
+test('Send to leadership needs a trusted tap, reports server errors and keeps working state', async () => {
+  let status = 429;
+  const f = await fixture({ respond: uploadResponder(() => ({ status, responseText: JSON.stringify({ error: 'Too many logs sent from this connection. Try again in an hour.' }) })) });
+  const before = f.requests.length;
+  await f.button('Send to leadership').dispatch('click', { isTrusted: false }); await settle();
+  assert.equal(f.requests.length, before);
+  await f.click('Send to leadership');
+  assert.match(f.h.getLogHint(), /^Not sent: Too many logs/);
+  status = 500;
+  await f.click('Send to leadership');
+  assert.match(f.h.getLogHint(), /^Not sent: Too many logs/, 'server error text is shown, never the raw body otherwise');
+  // Not connected: ticking the box still sends no identity.
+  f.h.getLogIdentity().checked = true; status = 201;
+  await f.click('Send to leadership');
+  assert.equal(f.posts.at(-1).body.sender, undefined);
+  assert.equal(f.h.getState().cooldown, 0, 'upload failures never pause TF');
+});
+
+test('saved owner names are validated on load', async () => {
+  const f = await fixture({ respond: uploadResponder(() => ({})) });
+  await f.connect(true);
+  const saved = JSON.parse(f.store[STORE]); saved.ownerName = '<img src=x>';
+  const reload = await fixture({ store: { ...f.store, [STORE]: JSON.stringify(saved) } });
+  assert.equal(reload.h.getState().ownerName, '');
+});
+
+test('metadata allows the log upload host and the data-use notice mentions it', () => {
+  assert.match(source, /@connect\s+shadowreapersfaction\.com/);
+  assert.match(source, /Your key is never sent/);
 });

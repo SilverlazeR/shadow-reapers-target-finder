@@ -3,6 +3,16 @@
 Formerly Halloween Targets in `SilverlazeR/torn-company-command-center` (PRs #124, #139-#146).
 History below is preserved as written there; file paths in older entries refer to that repository.
 
+v0.5.1 adds **Send to leadership** to the Logs panel (owner request, October 31, 2026), for
+reports too long to paste in Discord.
+- **What is sent:** one tap uploads only the visible diagnostic report to
+  `shadowreapersfaction.com/api/public/script-logs`, where only the Shadow Reapers owner can read
+  it; it is deleted after 30 days. The reply shows a log number to mention in Discord.
+- **Identity is opt-in:** an unticked-by-default box adds the key owner's Torn ID and name. The
+  name is remembered from Torn's own-profile reply when the key is connected (reconnect once to
+  fill it in); the ID is already known. The key is never sent. Upload failures never pause TF.
+- **Metadata:** adds `@connect shadowreapersfaction.com`.
+
 v0.5.0 moves the script to this repository (owner request, October 31, 2026). `@downloadURL` and
 `@updateURL` now point at this repository's `main` branch. The website keeps a hand-off copy at both
 old addresses so existing installs move here on their next update. Storage names, settings and

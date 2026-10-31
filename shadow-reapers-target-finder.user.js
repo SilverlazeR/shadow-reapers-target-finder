@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shadow Reapers Target Finder
 // @namespace    https://shadowreapersfaction.com
-// @version      0.5.0
+// @version      0.5.1
 // @downloadURL  https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @updateURL    https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @description  Tap TF to open your next matching target; estimated stats, inactivity, faction and fair-fight filters.
@@ -13,6 +13,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      ffscouter.com
 // @connect      api.torn.com
+// @connect      shadowreapersfaction.com
 // ==/UserScript==
 
 // Keep this download ASCII-only; use Unicode escapes in UI strings for PDA imports.
@@ -28,7 +29,8 @@
   const LEGACY_BSP_KEY = 'sr_halloween_bsp_key_v1';
   const SEARCH_BUDGET = 'sr_halloween_search_budget_v1';
   const LOG_STORE = 'sr_halloween_logs_v1', LOG_LIMIT = 100;
-  let logs = [], logPanel, logText, logHint, logStorageError = false, logWriting = false, pendingLogSnapshot = null;
+  const LOG_UPLOAD = 'https://shadowreapersfaction.com/api/public/script-logs';
+  let logs = [], logPanel, logText, logHint, logIdentity, logSending = false, logStorageError = false, logWriting = false, pendingLogSnapshot = null;
   let logEpoch = 0;
   let activeTrace = null;
   const TRACE_COUNTS = ['tornRequests', 'ffRequests', 'networkMs', 'pacingMs', 'cachedChecks', 'newCandidateChecks', 'newIDChecks',
@@ -47,7 +49,7 @@
   }
   const CACHE_LIMIT = 1000;
   // At most 48 TF profile checks a minute, leaving 52 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.0', MISS_REFRESH = 3, TAP_CHECKS = 20;
+  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.1', MISS_REFRESH = 3, TAP_CHECKS = 20;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
@@ -63,7 +65,7 @@
   const positiveID = value => Number.isSafeInteger(value) && value > 0;
   const now = () => Math.floor(Date.now() / 1000);
   function emptyState() {
-    return { version: 1, ffOrderVersion: 1, availableOrderVersion: 1, poolVersion: 1, pool: [], poolMaxFF: null, poolExhausted: false, poolFetched: 0, config: { ...DEFAULTS }, owner: null, rows: [], pending: [], used: [], saved: [], savedCursor: 0, lastMessage: '', deferred: [], scan: null, band: 0, scanned: 0, checked: 0, cooldown: 0, cooldownReason: '', nextTorn: 0 };
+    return { version: 1, ffOrderVersion: 1, availableOrderVersion: 1, poolVersion: 1, pool: [], poolMaxFF: null, poolExhausted: false, poolFetched: 0, config: { ...DEFAULTS }, owner: null, ownerName: '', rows: [], pending: [], used: [], saved: [], savedCursor: 0, lastMessage: '', deferred: [], scan: null, band: 0, scanned: 0, checked: 0, cooldown: 0, cooldownReason: '', nextTorn: 0 };
   }
   function statInput(value, fallback) {
     const text = String(value).trim().replace(/,/g, '');
@@ -342,6 +344,33 @@
       }
     } finally { logWriting = false; renderLogs(); }
   }
+  function tornName(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(value) ? value : ''; }
+  // Sends only the visible report, and only on a deliberate tap. The key is
+  // never included; the Torn name/ID are added only when the box is ticked.
+  async function sendLogs(event) {
+    if (!event.isTrusted || !active() || logSending) return;
+    const report = logReport(); logText.value = report;
+    const body = { script: 'target-finder', log: report, note: 'Sent from Target Finder v' + VERSION };
+    if (logIdentity.checked && positiveID(state.owner)) body.sender = { id: state.owner, ...(state.ownerName ? { name: state.ownerName } : {}) };
+    logSending = true; logHint.textContent = 'Sending to Shadow Reapers leadership...';
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const headers = { Accept: 'application/json', 'Content-Type': 'application/json' }, data = JSON.stringify(body);
+        const timer = setTimeout(() => reject(Error('timeout')), 20000);
+        const done = value => { clearTimeout(timer); resolve(value); }, fail = () => { clearTimeout(timer); reject(Error('failed')); };
+        if (typeof PDA_httpPost === 'function') Promise.resolve(PDA_httpPost(LOG_UPLOAD, headers, data)).then(done, fail);
+        else if (typeof GM_xmlhttpRequest === 'function') GM_xmlhttpRequest({ method: 'POST', url: LOG_UPLOAD, headers, data, anonymous: true, redirect: 'error', timeout: 20000, onload: done, onerror: fail, ontimeout: fail });
+        else fail();
+      });
+      let reply = {};
+      try { reply = JSON.parse(response.responseText); } catch {}
+      if (Number(response.status) !== 201 || !positiveID(reply.id)) throw Error(typeof reply.error === 'string' ? reply.error.slice(0, 160) : 'failed');
+      logHint.textContent = 'Sent as log #' + reply.id + '. Tell leadership that number in Discord.';
+    } catch (error) {
+      logHint.textContent = error.message === 'failed' || error.message === 'timeout'
+        ? 'Could not send the log. Try again, or use Copy logs and paste it in Discord.' : 'Not sent: ' + error.message;
+    } finally { logSending = false; }
+  }
   function logReport() {
     const latestWait = [...logs].reverse().find(entry => entry.kind === 'wait');
     const until = Math.max(state.cooldown, latestWait?.until || 0);
@@ -420,6 +449,7 @@
     };
     const result = emptyState();
     result.config = Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, String(s.config[k])]));
+    result.ownerName = tornName(s.ownerName);
     result.owner = s.owner; result.rows = s.rows.map(cleanRow); result.pending = s.pending.map(cleanRow); result.used = s.used;
     if (s.pool !== undefined && (!Array.isArray(s.pool) || s.pool.length > CACHE_LIMIT)) throw Error('Saved candidate pool is invalid.');
     result.pool = (s.pool || []).map(cleanRow);
@@ -609,6 +639,8 @@
     if (state.owner !== owner.player_id) {
       state = { ...emptyState(), config: state.config, owner: owner.player_id, nextTorn: state.nextTorn };
     }
+    // Remembered only so the owner can choose to name themselves on a sent log.
+    state.ownerName = tornName(owner.name);
     await save(); ensure(run);
     await persistKey(KEY, remember.checked ? entered : '');
     ensure(run); apiKey = entered; keySaved = remember.checked; keyInput.value = '';
@@ -1125,6 +1157,7 @@
       .dock button[data-working=true]{background:#75521b;border-color:#ffd08a}
       .dock button.logs-button{min-height:24px;font-size:9px;line-height:16px;background:#34302c}
       .diagnostics{position:fixed;z-index:2;right:max(6px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));width:min(440px,calc(100vw - 12px));max-height:calc(100dvh - 130px - env(safe-area-inset-bottom));overflow:auto;background:#191919;border:1px solid #98633b;border-radius:10px;padding:12px;box-shadow:0 8px 40px #000b}
+      .diagnostics .send-identity{display:flex;align-items:center;gap:8px;min-height:40px}.diagnostics .send-note{font-size:12px;color:#c7beb7}
       .diagnostics textarea{display:block;box-sizing:border-box;width:100%;height:min(300px,40dvh);background:#202020;color:#f3f3f3;border:1px solid #777;border-radius:5px;padding:8px;font:12px/1.5 monospace;white-space:pre-wrap;overflow-wrap:anywhere;resize:vertical}
       .panel{position:fixed;right:max(6px,env(safe-area-inset-right));top:max(8px,env(safe-area-inset-top));width:min(440px,calc(100vw - 12px));max-height:calc(100dvh - 120px - env(safe-area-inset-bottom));overflow:auto;overscroll-behavior:contain;background:#191919;border:1px solid #98633b;border-radius:10px;padding:12px;box-shadow:0 8px 40px #000b}
       .profile-panel{position:static;width:100%;max-width:750px;max-height:none;margin:8px 0;box-shadow:none}
@@ -1155,11 +1188,16 @@
         logHint.textContent = 'Automatic copy unavailable. The report is selected; use your device\u2019s Copy command.';
       }
     });
+    button('Send to leadership', logActions, sendLogs);
     button('Refresh logs', logActions, event => { if (event.isTrusted && active()) renderLogs(); });
     button('Clear logs', logActions, async event => {
       if (!event.isTrusted || !active()) return;
       logEpoch++; logs = []; void flushLogs(); renderLogs();
     });
+    const identityWrap = element('label', undefined, logPanel); identityWrap.className = 'send-identity';
+    logIdentity = element('input', undefined, identityWrap); logIdentity.type = 'checkbox';
+    identityWrap.append(document.createTextNode('Include my Torn name and ID'));
+    element('p', 'Send to leadership uploads only this report to shadowreapersfaction.com, where only the Shadow Reapers owner can read it. It is deleted after 30 days. Your key is never sent; your name and ID only if ticked.', logPanel).className = 'send-note';
     panel = element('section', undefined, root); panel.className = 'panel'; panel.hidden = true; panel.setAttribute('aria-label', 'target finder');
     const header = element('header', undefined, panel); element('h2', 'Target finder', header);
     button('Close', header, () => { showPanel(false); });

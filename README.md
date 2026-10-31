@@ -24,13 +24,14 @@ do not delete the entry.
 - **Candidates:** they come from FFScouter. The default order is *most likely available first*.
   Recently opened, often-hospitalised and skipped statuses (federal, travel, fallen) are deferred.
 - **Settings and logs:** settings live under **TF Settings** on your own Torn profile. **Logs**
-  copies a diagnostic report without keys, player identities or response bodies.
+  copies a diagnostic report without keys, player identities or response bodies. **Send to
+  leadership** uploads that report to the Shadow Reapers owner and shows a log number for Discord.
 
 ## Data use
 
 | Data storage | Data sharing | Purpose | Key storage & sharing | Key access level |
 |---|---|---|---|---|
-| Only locally on your device until cleared | Nobody here; FFScouter receives requested IDs under its policy | Competitive advantage: find targets | Sent only to Torn and FFScouter; saved locally only if you choose Remember | Custom: basic, battlestats, attacks, hof, profile |
+| Only locally on your device until cleared; a log you choose to send is kept 30 days on shadowreapersfaction.com | Nobody here; FFScouter receives requested IDs under its policy; a sent log (plus your Torn name and ID only if ticked) goes to the Shadow Reapers owner | Competitive advantage: find targets | Sent only to Torn and FFScouter; saved locally only if you choose Remember | Custom: basic, battlestats, attacks, hof, profile |
 
 ## Development
 
