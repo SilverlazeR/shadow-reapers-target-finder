@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shadow Reapers Target Finder
 // @namespace    https://shadowreapersfaction.com
-// @version      0.5.2
+// @version      0.5.3
 // @downloadURL  https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @updateURL    https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @description  Tap TF to open your next matching target; estimated stats, inactivity, faction and fair-fight filters.
@@ -49,14 +49,16 @@
   }
   const CACHE_LIMIT = 1000;
   // At most 48 TF profile checks a minute, leaving 52 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.2', MISS_REFRESH = 3, TAP_CHECKS = 20;
+  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.3', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
   const LEGACY_REASONS = { 'HF pause after Torn backend errors': 'TF pause after Torn backend errors', 'HF target-list budget': 'TF target-list budget' };
   let state = emptyState(), apiKey = '', busy = false, generation = 0, cancelRequest = null;
   let keySaved = false, keyStatus;
-  let keyError = '';
+  let keyError = '', ffKeyRejects = 0;
+  const KEY_HOLDS = { 10: 'Torn will not accept this key while its owner is in federal jail', 13: 'Torn disabled this key because its owner has been inactive',
+    16: 'This key\u2019s access level is too low; use a custom key with the listed selections', 18: 'This key is paused in Torn; unpause it under Settings, API Keys' };
   let searchReasons = {}, backendErrors = 0;
   let buttonBadge = '', progressLabel = '...';
   let root, host, dock, panel, notice, summary, limits, list, savedList, savedSummary, keyInput, remember, consent, findButton, searchButton, targetButton, settingsHost, fields = {};
@@ -65,7 +67,7 @@
   const positiveID = value => Number.isSafeInteger(value) && value > 0;
   const now = () => Math.floor(Date.now() / 1000);
   function emptyState() {
-    return { version: 1, ffOrderVersion: 1, availableOrderVersion: 1, poolVersion: 1, pool: [], poolMaxFF: null, poolExhausted: false, poolFetched: 0, config: { ...DEFAULTS }, owner: null, ownerName: '', rows: [], pending: [], used: [], saved: [], savedCursor: 0, lastMessage: '', deferred: [], scan: null, band: 0, scanned: 0, checked: 0, cooldown: 0, cooldownReason: '', nextTorn: 0 };
+    return { version: 1, ffOrderVersion: 1, availableOrderVersion: 1, poolVersion: 1, pool: [], poolMaxFF: null, poolExhausted: false, poolFetched: 0, config: { ...DEFAULTS }, owner: null, ownerName: '', rows: [], pending: [], used: [], saved: [], savedCursor: 0, lastMessage: '', deferred: [], deferredUntil: {}, scan: null, band: 0, scanned: 0, checked: 0, cooldown: 0, cooldownReason: '', nextTorn: 0 };
   }
   function statInput(value, fallback) {
     const text = String(value).trim().replace(/,/g, '');
@@ -198,6 +200,21 @@
     if (index >= 0) state.saved[index] = { ...state.saved[index], ...row };
     else if (state.saved.length < CACHE_LIMIT && matches(row, filters(state.config))) state.saved.push({ ...row });
   }
+  // A Torn backend error (code 17) sets a player aside for an hour, then they
+  // return to normal checks. Retry failed IDs still rechecks them sooner.
+  function isDeferred(id) { return state.deferred.includes(id) && (state.deferredUntil[id] ?? 0) > now(); }
+  function deferID(id) {
+    pruneDeferred();
+    if (!state.deferred.includes(id)) {
+      if (state.deferred.length >= 100) { delete state.deferredUntil[state.deferred[0]]; state.deferred.shift(); }
+      state.deferred.push(id);
+    }
+    state.deferredUntil[id] = now() + DEFER_SECONDS;
+  }
+  function undefer(id) { state.deferred = state.deferred.filter(item => item !== id); delete state.deferredUntil[id]; }
+  function pruneDeferred() {
+    for (const id of state.deferred.filter(item => !isDeferred(item))) undefer(id);
+  }
   function cachedRelease(row) {
     return ['Hospital', 'Jail'].includes(row.status) && numeric(row.checkedAt) !== null &&
       row.checkedAt > 0 && row.checkedAt <= now() && numeric(row.statusUntil) !== null &&
@@ -205,7 +222,7 @@
   }
   function quickSavedCandidate(row, f) {
     if ((cachedRelease(row) ?? 0) > now() || skippedUntil(row, f) > now()) return false;
-    if (state.used.includes(row.id) || state.deferred.includes(row.id) || !statMatch(row, f)) return false;
+    if (state.used.includes(row.id) || isDeferred(row.id) || !statMatch(row, f)) return false;
     // Recently rejected snapshots can save a request, never authorize an attack.
     // Manual rechecks bypass this brief negative cache.
     return profileMatch(row, f) || numeric(row.checkedAt) === null || now() - row.checkedAt >= 60;
@@ -474,6 +491,9 @@
     result.savedCursor = Number.isInteger(s.savedCursor) && s.savedCursor >= 0 && s.savedCursor < result.saved.length ? s.savedCursor : 0;
     if (s.deferred !== undefined && (!Array.isArray(s.deferred) || s.deferred.length > 100 || !s.deferred.every(positiveID))) throw Error('Saved deferred IDs are invalid.');
     result.deferred = [...new Set(s.deferred || [])];
+    // Older saves have no expiry; give their deferred IDs one more hour.
+    const until = s.deferredUntil && typeof s.deferredUntil === 'object' ? s.deferredUntil : {};
+    result.deferredUntil = Object.fromEntries(result.deferred.map(id => [id, numeric(until[id]) ?? now() + DEFER_SECONDS]));
     result.band = s.band;
     if (s.scan) {
       const { min, max, offset, cursor } = s.scan, size = max - min + 1;
@@ -571,14 +591,25 @@
       logEvent('wait', { service, reason: state.cooldownReason, until: state.cooldown });
       await save(); throw Error(service + ' rate limit reached. Wait, then tap again; there is no automatic retry.');
     }
+    if (service === 'FFScouter' && status >= 200 && status < 300 && !data.error) ffKeyRejects = 0;
     if (service === 'FFScouter' && code === 17 && status === 404) return { targets: [] };
     if (service === 'FFScouter' && options.body && status === 409 && code === 8) return { success: true };
     if (service === 'Torn' && code === 6 && options.allowMissing) return null;
     if (status < 200 || status >= 300 || !Number.isFinite(status) || data.error) {
-      if (service === 'Torn' && [1, 2, 10, 13, 16, 18].includes(code) || service === 'FFScouter' && [1, 2, 6].includes(code)) {
-        apiKey = ''; keySaved = false; await writeStorage(KEY, '');
-        throw Error(service + ' rejected the key or its permissions. Reconnect in settings.');
+      // Erase only a key that is wrong. A valid key Torn cannot use right now
+      // (owner in federal jail, inactive, paused, access too low) stops this tap
+      // and stays saved. FFScouter's code 6 is erased only when it repeats.
+      const invalid = service === 'Torn' ? [1, 2].includes(code) : [1, 2].includes(code) || code === 6 && ffKeyRejects >= 1;
+      if (invalid) {
+        apiKey = ''; keySaved = false; ffKeyRejects = 0; await writeStorage(KEY, '');
+        throw Error(service + ' rejected the key. It was removed; reconnect in settings.');
       }
+      if (service === 'FFScouter' && code === 6) {
+        ffKeyRejects++;
+        throw Error('FFScouter rejected the key. It is kept for now; tap again to retry. If FFScouter rejects it again it will be removed.');
+      }
+      const unusable = service === 'Torn' ? KEY_HOLDS[code] : [4010, 4011].includes(code) ? 'FFScouter has banned this account or faction' : null;
+      if (unusable) throw Error(unusable + ' (' + service + ' code ' + code + '). Your key is kept; fix this, then tap again.');
       const error = Error(service + ' request failed' + (Number.isInteger(code) ? ' (code ' + code + ')' : '') + '. Tap again later.');
       if (service === 'Torn' && code === 17) error.tornCode = 17;
       throw error;
@@ -676,19 +707,18 @@
   }
   function scanID(scan) { return scan.min + (scan.offset + scan.cursor) % (scan.max - scan.min + 1); }
   async function scoutProfile(row, run, fresh = false) {
-    if (state.deferred.length >= 100 && !state.deferred.includes(row.id)) throw Error('100 failed IDs saved. Use Retry failed IDs in TF Settings before searching further.');
     try {
       const data = await request(profileURL(apiKey, row.id, fresh), run, 'Torn', { allowMissing: true });
       ensure(run); backendErrors = 0;
       const updated = data ? profile(row, data) : null;
-      state.deferred = state.deferred.filter(id => id !== row.id);
+      undefer(row.id);
       return updated;
     } catch (error) {
       ensure(run);
       if (error.tornCode !== 17) throw error;
       // A backend error is not proof that this player is unsuitable. Save for
       // explicit retry, and let discovery examine other IDs without looping here.
-      if (!state.deferred.includes(row.id)) state.deferred.push(row.id);
+      deferID(row.id);
       backendErrors++;
       searchReasons['Torn backend error (saved for retry)'] = (searchReasons['Torn backend error (saved for retry)'] || 0) + 1;
       return undefined;
@@ -710,10 +740,10 @@
       const row = await scoutProfile({ id, stats: null, ff: null, fetchedAt: null }, run);
       // Keep the retry entry until enrichment also succeeds.
       if (row && profileMatch(row, f)) {
-        if (!state.deferred.includes(id)) state.deferred.push(id);
+        deferID(id);
         await save(); await enrich(row, run); ensure(run);
         state.rows = state.rows.filter(item => item.id !== id); state.rows.push(row); rememberTarget(row);
-        state.deferred = state.deferred.filter(item => item !== id);
+        undefer(id);
       }
       if (row !== undefined) { state.checked++; searchOutcome(row, f); }
       await save(); render(); await checkBackendErrors();
@@ -818,7 +848,7 @@
     else { if (state.pool.length >= CACHE_LIMIT) state.pool.shift(); state.pool.push({ ...row }); }
   }
   function poolEligible(row, f, attempted) {
-    if (attempted.has(row.id) || row.id === state.owner || state.deferred.includes(row.id) || skippedUntil(row, f) > now()) return false;
+    if (attempted.has(row.id) || row.id === state.owner || isDeferred(row.id) || skippedUntil(row, f) > now()) return false;
     const waiting = ['Hospital', 'Jail'].includes(row.status);
     const checked = numeric(row.checkedAt) !== null && row.checkedAt > 0 && row.checkedAt <= now();
     const release = cachedRelease(row);
@@ -856,7 +886,7 @@
     countTrace('outsideStatsAtStart', state.pool.filter(row => numeric(row.stats) !== null && (row.stats < f.min || row.stats > f.max)).length);
     countTrace('outsideFFAtStart', state.pool.filter(row => numeric(row.ff) !== null && (row.ff < f.minFF || row.ff > f.maxFF)).length);
     countTrace('recentActivityAtStart', state.pool.filter(row => numeric(row.lastAction) !== null && now() - row.lastAction < f.days * DAY).length);
-    countTrace('deferredAtStart', state.pool.filter(row => state.deferred.includes(row.id)).length);
+    countTrace('deferredAtStart', state.pool.filter(row => isDeferred(row.id)).length);
     countTrace('skippedStatusAtStart', state.pool.filter(row => skippedUntil(row, f) > now()).length);
     countTrace('contestedAtStart', state.pool.filter(contested).length);
     const cachedIDs = new Set(state.pool.map(row => row.id));
@@ -1172,7 +1202,7 @@
       .panel{position:fixed;right:max(6px,env(safe-area-inset-right));top:max(8px,env(safe-area-inset-top));width:min(440px,calc(100vw - 12px));max-height:calc(100dvh - 120px - env(safe-area-inset-bottom));overflow:auto;overscroll-behavior:contain;background:#191919;border:1px solid #98633b;border-radius:10px;padding:12px;box-shadow:0 8px 40px #000b}
       .profile-panel{position:static;width:100%;max-width:750px;max-height:none;margin:8px 0;box-shadow:none}
       header{display:flex;justify-content:space-between;align-items:center;gap:10px}h2{font-size:18px;margin:0}p{margin:8px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.grid label:last-child{grid-column:1/-1}label{display:block}.primary{background:#a74c12;border-color:#d57e3b}.settings-actions button{flex:1}.skips{border:1px solid #49413b;border-radius:7px;margin:0 0 10px;padding:6px 10px}.skips legend{padding:0 4px}.skips label{display:inline-flex;align-items:center;min-height:36px;margin:0 14px 0 0}
-      .actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.notice{color:#ffca95;white-space:pre-wrap}.target{padding:10px 0;border-top:1px solid #49413b}small{color:#c7beb7}details{margin:12px 0}summary{cursor:pointer;min-height:36px;padding:8px 0}table{border-collapse:collapse;width:100%;font-size:12px}td,th{text-align:left;vertical-align:top;padding:5px;border:1px solid #555}th{width:28%}
+      .actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.notice{color:#ffca95;white-space:pre-wrap}.target{padding:10px 0;border-top:1px solid #49413b}small{color:#c7beb7}h3{font-size:14px;margin:10px 0 6px}details{margin:12px 0}summary{cursor:pointer;min-height:36px;padding:8px 0}table{border-collapse:collapse;width:100%;font-size:12px}td,th{text-align:left;vertical-align:top;padding:5px;border:1px solid #555}th{width:28%}
     `, root);
     dock = element('div', undefined, root); dock.className = 'dock';
     targetButton = button('TF', dock, event => {
@@ -1232,11 +1262,13 @@
     }); searchButton.className = 'primary';
     summary = element('p', '', panel);
     const account = element('details', undefined, panel); account.open = !apiKey; element('summary', 'Torn / FFScouter connection', account);
-    const policy = element('details', undefined, account); element('summary', 'Data use and permissions', policy);
-    const table = element('table', undefined, policy);
+    // Torn requires this table to be clearly visible where the key is entered,
+    // so it is never collapsed inside the key form.
+    element('h3', 'Data use and permissions', account);
+    const table = element('table', undefined, account);
     for (const [label, value] of [
       ['Data Storage', 'This script: filters, estimates, profile checks, up to 1,000 saved targets and opened IDs stay only on your device until cleared. The latest 100 diagnostic events and 20 action summaries are also stored locally, without keys or player identities; Logs lets you copy or clear them. Saved targets survive search resets and filter changes; Clear saved targets removes that library. FFScouter separately stores your registered key and data under its linked policy.'],
-      ['Data Sharing', 'No shortlist is shared with our servers or faction. FFScouter receives requested target IDs and uses your key for its own collection; its public estimate pool is shared with other users.'],
+      ['Data Sharing', 'No shortlist is shared with our servers or faction. FFScouter receives requested target IDs and uses your key for its own collection; its public estimate pool is shared with other users. Only if you tap Send to leadership in Logs, that report (plus your Torn name and ID if ticked) goes to the Shadow Reapers owner and is deleted after 30 days.'],
       ['Purpose of Use', 'Competitive advantage: find and compare targets. Read-only API scouting, no gameplay actions or page scraping. FFScouter also uses permitted data for estimation and model training under its policy.'],
       ['Key Storage & Sharing', 'Sent to Torn and FFScouter only. Memory-only here unless Remember saves it in PDA/private userscript storage. FFScouter retains registered keys separately. Forget removes only this script\u2019s copy; revoke/pause the key in Torn or use FFScouter\u2019s removal controls to stop provider access.'],
       ['Key Access Level', 'Prefer a custom key: user basic, battlestats, attacks, hof, profile (personalstats optional for FFScouter). Limited/Full also work but grant more access. Connect checks registration and registers only after consent.']
@@ -1275,7 +1307,7 @@
       state.rows = []; state.pending = []; state.pool = []; state.poolMaxFF = null; state.poolExhausted = false; state.poolFetched = 0; state.band = 0; state.scanned = 0; state.checked = 0; await save(); tell('Shortlist and FF samples reset. Independent ID progress and opened targets retained.');
     }));
     button('Restart ID search', more, event => action(event, async () => {
-      state.scan = null; state.rows = []; state.pending = []; state.deferred = []; state.checked = 0; state.scanned = 0; await save(); tell('ID progress reset. Previously checked IDs may return; opened targets remain excluded.');
+      state.scan = null; state.rows = []; state.pending = []; state.deferred = []; state.deferredUntil = {}; state.checked = 0; state.scanned = 0; await save(); tell('ID progress reset. Previously checked IDs may return; opened targets remain excluded.');
     }));
     button('Clear opened history', more, event => action(event, async () => { state.used = []; await save(); tell('Opened history cleared; previously opened targets may appear again.'); }));
     button('Clear saved targets', more, event => action(event, async () => { state.saved = []; state.savedCursor = 0; await save(); tell('Saved target library cleared. The current shortlist and search progress remain.'); }));

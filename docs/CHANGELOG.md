@@ -3,6 +3,17 @@
 Formerly Halloween Targets in `SilverlazeR/torn-company-command-center` (PRs #124, #139-#146).
 History below is preserved as written there; file paths in older entries refer to that repository.
 
+v0.5.3 fixes three code-review items (owner request, October 31, 2026).
+- **Torn rules:** the data-use table now sits open directly above the key field instead of inside a
+  collapsed section, so it is clearly visible where the key is entered. Data Sharing mentions Send
+  to leadership.
+- **Saved keys:** only wrong keys are erased (Torn 1/2, FFScouter 1/2, or FFScouter 6 twice in a
+  row). Torn 10/13/16/18 (federal jail, inactive owner, access too low, paused) and FFScouter bans
+  stop the tap with a specific reason and keep the key.
+- **Failed IDs:** players set aside after a Torn backend error (code 17) return to normal checks
+  after an hour. A full list of 100 drops the oldest instead of blocking searches. Older saves give
+  their IDs one more hour.
+
 v0.5.2 adds a **Settings** line to the diagnostic report (owner request, October 31, 2026): FF
 range and priority, stat limits, inactive days, faction, order, source, ID range and skip boxes,
 so a shared log shows how the search was set up. It contains only the user's own filters.
