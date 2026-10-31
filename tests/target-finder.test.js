@@ -57,7 +57,7 @@ async function fixture({ kind = 'pda', store = {}, respond, page = '/index.php',
       getKey: () => apiKey, getFields: () => fields, getPanel: () => panel, getNotice: () => notice.textContent,
       getTargetButton: () => targetButton, getPopup: () => root.children.find(n => n.className === 'toast'), getKeyStatus: () => keyStatus.textContent,
       getKeyInput: () => keyInput, getConsent: () => consent, getRemember: () => remember,
-      scanID, selectedStats, ready, stop, keepPool, rememberTarget, logReport, logEvent, flushLogs,
+      scanID, selectedStats, ready, stop, keepPool, rememberTarget, logReport, logEvent, flushLogs, isDeferred,
       getLogPanel: () => logPanel, getLogHint: () => logHint.textContent, getLogText: () => logText, getLogIdentity: () => logIdentity };
     globalThis.started = start();
   })();`);
@@ -173,8 +173,26 @@ test('rate limits pause without retry; invalid keys are erased and raw error tex
   await f.connect(true); await f.click('Find / check more');
   assert.match(f.h.getNotice(), /rate limit/); assert.equal(f.h.getNotice().includes(TEST_KEY), false);
   const count = f.requests.length; await f.click('Find / check more'); assert.equal(f.requests.length, count);
+  // FFScouter code 6 is kept once (it can be transient) and erased when it repeats.
   fail = false; f.h.getState().cooldown = 0; await f.click('Find / check more');
+  assert.equal(f.h.getKey(), TEST_KEY); assert.equal(f.store[KEY], TEST_KEY); assert.match(f.h.getNotice(), /kept for now/);
+  await f.click('Find / check more');
   assert.equal(f.h.getKey(), ''); assert.equal(f.store[KEY], ''); assert.equal(f.h.getNotice().includes(TEST_KEY), false);
+});
+
+test('only wrong keys are erased; usable-later Torn keys stay saved with a specific reason', async () => {
+  for (const [code, reason] of [[10, /federal jail/], [13, /inactive/], [16, /access level/], [18, /paused/]]) {
+    let block = false;
+    const f = await fixture({ respond: url => url.hostname === 'ffscouter.com' ? { targets: [raw()] }
+      : block ? { error: { code, error: 'raw text ' + TEST_KEY } } : torn(999) });
+    await f.connect(true); block = true; await f.click('Find / check more');
+    assert.equal(f.h.getKey(), TEST_KEY, 'code ' + code); assert.equal(f.store[KEY], TEST_KEY);
+    assert.match(f.h.getNotice(), reason); assert.match(f.h.getNotice(), /key is kept/); assert.equal(f.h.getNotice().includes(TEST_KEY), false);
+  }
+  let wrong = false;
+  const f = await fixture({ respond: url => url.hostname === 'ffscouter.com' ? { targets: [raw()] } : wrong ? { error: { code: 2, error: 'Incorrect key' } } : torn(999) });
+  await f.connect(true); wrong = true; await f.click('Find / check more');
+  assert.equal(f.h.getKey(), ''); assert.equal(f.store[KEY], ''); assert.match(f.h.getNotice(), /removed/);
 });
 
 test('blur cancels pending discovery and stale responses never populate targets or navigate', async () => {
@@ -240,7 +258,7 @@ test('update metadata points to the main-branch script in this repository with a
   const download = new URL(metadata.downloadurl);
   assert.equal(metadata.name, 'Shadow Reapers Target Finder');
   assert.equal(metadata.namespace, 'https://shadowreapersfaction.com');
-  assert.equal(metadata.version, '0.5.2');
+  assert.equal(metadata.version, '0.5.3');
   assert.equal(download.href, 'https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js');
   assert.equal(metadata.updateurl, download.href);
   assert.equal(download.search, '');
@@ -260,7 +278,7 @@ test('PDA Latin-1 import preserves the compact settings button, punctuation and 
   assert.ok(text(f.body).join('\n').includes(' ready \u00b7 '));
 });
 
-test('scouting key retains collapsed data disclosures and accessible provider policy links', async () => {
+test('data-use table is always visible above the key field, with provider policy links', async () => {
   const f = await fixture();
   const all = n => [n, ...(n.children || []).flatMap(all), ...(n.shadow ? all(n.shadow) : [])];
   for (const input of [f.h.getKeyInput()]) {
@@ -270,8 +288,10 @@ test('scouting key retains collapsed data disclosures and accessible provider po
       ['Data Storage', 'Data Sharing', 'Purpose of Use', 'Key Storage & Sharing', 'Key Access Level']);
     assert.ok(nodes.some(n => n.tagName === 'A' && /ffscouter.com|t=16290324/.test(n.href)));
     assert.ok(all(table).some(n => /Forget.*only this script/.test(n.textContent)));
-    assert.equal(table.parentElement.tagName, 'DETAILS'); assert.ok(!table.parentElement.open);
-    assert.ok(section.children.indexOf(table.parentElement) < section.children.indexOf(input.parentElement));
+    // Torn: the table must be clearly visible where the key is entered, never collapsed.
+    assert.equal(table.parentElement, section); assert.equal(section.tagName, 'DETAILS'); assert.ok(section.open);
+    assert.ok(section.children.indexOf(table) < section.children.indexOf(input.parentElement));
+    assert.ok(all(table).some(n => /Send to leadership/.test(n.textContent)));
   }
 });
 
@@ -1464,7 +1484,7 @@ for (const kind of ['pda', 'gm']) test(kind + ': WAIT logs persist across pages 
   await reload.click('Logs'); await reload.click('Copy logs');
   assert.equal(reload.requests.length, 0); assert.equal(reload.navigations.length, 0);
   assert.match(copied, /Torn throttle\/block/); assert.match(copied, /HTTP 429 code 5/);
-  assert.match(copied, /seconds remaining/); assert.match(copied, /TF v0.5.2/);
+  assert.match(copied, /seconds remaining/); assert.match(copied, /TF v0.5.3/);
   assert.ok(!copied.includes(TEST_KEY)); assert.equal(reload.h.getPanel().hidden, true);
   await reload.click('Close logs'); assert.equal(reload.h.getLogPanel().hidden, true);
   reload.advance(63000); await reload.click('Logs'); assert.match(reload.h.logReport(), /WAIT has expired/);
@@ -1658,7 +1678,7 @@ test('errors carry a fixed detail label in stored and copied logs, never the fre
   assert.equal(error.detail, 'opened history full');
   assert.match(f.h.logReport(), /error operation: opened history full/);
   assert.equal(f.h.logEvent('error', { detail: 'Player 123 secret text' }).detail, undefined, 'Unknown details are dropped');
-  assert.match(f.h.logReport(), /^TF v0.5.2 diagnostics/);
+  assert.match(f.h.logReport(), /^TF v0.5.3 diagnostics/);
 });
 
 test('v0.4.2 defaults to most-likely-available order, including once for existing installs', async () => {
@@ -1803,7 +1823,7 @@ for (const kind of ['pda', 'gm']) test(kind + ': Send to leadership uploads only
   const post = f.posts.at(-1);
   assert.equal(post.url.href, UPLOAD);
   assert.deepEqual(Object.keys(post.body).sort(), ['log', 'note', 'script']);
-  assert.equal(post.body.script, 'target-finder'); assert.match(post.body.log, /^TF v0.5.2 diagnostics/);
+  assert.equal(post.body.script, 'target-finder'); assert.match(post.body.log, /^TF v0.5.3 diagnostics/);
   assert.ok(!JSON.stringify(post.body).includes(TEST_KEY)); assert.ok(!post.url.search);
   assert.match(f.h.getLogHint(), /log #12/);
   f.h.getLogIdentity().checked = true;
@@ -1850,4 +1870,24 @@ test('diagnostic report lists the search settings without player data', async ()
   const line = f.h.logReport().split('\n').find(l => l.startsWith('Settings: '));
   assert.equal(line, 'Settings: FF 1.5-2.5; stats 0-100m; inactive 30+ days; faction any; order available; source ff; IDs 1-any; skip federal/fallen.');
   assert.ok(!f.h.logReport().includes(TEST_KEY));
+});
+
+test('backend-error IDs return to normal checks after an hour and a full list never blocks searching', async () => {
+  const f = await fixture();
+  await f.connect();
+  const st = f.h.getState();
+  st.deferred = Array.from({ length: 100 }, (_, i) => i + 1000); st.deferredUntil = Object.fromEntries(st.deferred.map(id => [id, Math.floor(f.context.Date.now() / 1000) + 3600]));
+  await f.click('Find / check more');
+  assert.doesNotMatch(f.h.getNotice(), /100 failed IDs/);
+  assert.equal(f.h.isDeferred(1000), true);
+  f.advance(3601 * 1000);
+  assert.equal(f.h.isDeferred(1000), false, 'expired after an hour');
+});
+
+test('older saves without deferral times give their IDs one more hour', async () => {
+  const f = await fixture(); await f.connect(true);
+  const saved = JSON.parse(f.store[STORE]); saved.deferred = [100]; delete saved.deferredUntil;
+  const reload = await fixture({ store: { ...f.store, [STORE]: JSON.stringify(saved) } });
+  const until = reload.h.getState().deferredUntil[100];
+  assert.ok(until > NOW && until <= Math.floor(reload.context.Date.now() / 1000) + 3600);
 });
