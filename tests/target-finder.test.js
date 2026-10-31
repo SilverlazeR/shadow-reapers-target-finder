@@ -240,7 +240,7 @@ test('update metadata points to the main-branch script in this repository with a
   const download = new URL(metadata.downloadurl);
   assert.equal(metadata.name, 'Shadow Reapers Target Finder');
   assert.equal(metadata.namespace, 'https://shadowreapersfaction.com');
-  assert.equal(metadata.version, '0.5.1');
+  assert.equal(metadata.version, '0.5.2');
   assert.equal(download.href, 'https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js');
   assert.equal(metadata.updateurl, download.href);
   assert.equal(download.search, '');
@@ -1464,7 +1464,7 @@ for (const kind of ['pda', 'gm']) test(kind + ': WAIT logs persist across pages 
   await reload.click('Logs'); await reload.click('Copy logs');
   assert.equal(reload.requests.length, 0); assert.equal(reload.navigations.length, 0);
   assert.match(copied, /Torn throttle\/block/); assert.match(copied, /HTTP 429 code 5/);
-  assert.match(copied, /seconds remaining/); assert.match(copied, /TF v0.5.1/);
+  assert.match(copied, /seconds remaining/); assert.match(copied, /TF v0.5.2/);
   assert.ok(!copied.includes(TEST_KEY)); assert.equal(reload.h.getPanel().hidden, true);
   await reload.click('Close logs'); assert.equal(reload.h.getLogPanel().hidden, true);
   reload.advance(63000); await reload.click('Logs'); assert.match(reload.h.logReport(), /WAIT has expired/);
@@ -1658,7 +1658,7 @@ test('errors carry a fixed detail label in stored and copied logs, never the fre
   assert.equal(error.detail, 'opened history full');
   assert.match(f.h.logReport(), /error operation: opened history full/);
   assert.equal(f.h.logEvent('error', { detail: 'Player 123 secret text' }).detail, undefined, 'Unknown details are dropped');
-  assert.match(f.h.logReport(), /^TF v0.5.1 diagnostics/);
+  assert.match(f.h.logReport(), /^TF v0.5.2 diagnostics/);
 });
 
 test('v0.4.2 defaults to most-likely-available order, including once for existing installs', async () => {
@@ -1803,7 +1803,7 @@ for (const kind of ['pda', 'gm']) test(kind + ': Send to leadership uploads only
   const post = f.posts.at(-1);
   assert.equal(post.url.href, UPLOAD);
   assert.deepEqual(Object.keys(post.body).sort(), ['log', 'note', 'script']);
-  assert.equal(post.body.script, 'target-finder'); assert.match(post.body.log, /^TF v0\.5\.1 diagnostics/);
+  assert.equal(post.body.script, 'target-finder'); assert.match(post.body.log, /^TF v0.5.2 diagnostics/);
   assert.ok(!JSON.stringify(post.body).includes(TEST_KEY)); assert.ok(!post.url.search);
   assert.match(f.h.getLogHint(), /log #12/);
   f.h.getLogIdentity().checked = true;
@@ -1841,4 +1841,13 @@ test('saved owner names are validated on load', async () => {
 test('metadata allows the log upload host and the data-use notice mentions it', () => {
   assert.match(source, /@connect\s+shadowreapersfaction\.com/);
   assert.match(source, /Your key is never sent/);
+});
+
+test('diagnostic report lists the search settings without player data', async () => {
+  const f = await fixture({ sort: null });
+  await f.config({ maxStats: '100m', days: '30', minFF: '1.5', maxFF: '2.5' });
+  f.h.getFields().skipTravel.checked = false; await f.click('Save settings');
+  const line = f.h.logReport().split('\n').find(l => l.startsWith('Settings: '));
+  assert.equal(line, 'Settings: FF 1.5-2.5; stats 0-100m; inactive 30+ days; faction any; order available; source ff; IDs 1-any; skip federal/fallen.');
+  assert.ok(!f.h.logReport().includes(TEST_KEY));
 });

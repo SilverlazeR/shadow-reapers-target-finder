@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shadow Reapers Target Finder
 // @namespace    https://shadowreapersfaction.com
-// @version      0.5.1
+// @version      0.5.2
 // @downloadURL  https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @updateURL    https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @description  Tap TF to open your next matching target; estimated stats, inactivity, faction and fair-fight filters.
@@ -49,7 +49,7 @@
   }
   const CACHE_LIMIT = 1000;
   // At most 48 TF profile checks a minute, leaving 52 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.1', MISS_REFRESH = 3, TAP_CHECKS = 20;
+  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.2', MISS_REFRESH = 3, TAP_CHECKS = 20;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
@@ -371,6 +371,15 @@
         ? 'Could not send the log. Try again, or use Copy logs and paste it in Discord.' : 'Not sent: ' + error.message;
     } finally { logSending = false; }
   }
+  // Search settings for diagnostics. Values are the user's own filters, never player data.
+  function settingsLine() {
+    const c = state.config, text = v => String(v || '').trim().replace(/[^0-9A-Za-z.,]/g, '').slice(0, 20);
+    const skips = [['skipFederal', 'federal'], ['skipTravel', 'travel'], ['skipFallen', 'fallen']].filter(([k]) => c[k] === '1').map(([, label]) => label);
+    return 'Settings: FF ' + text(c.minFF) + '-' + text(c.maxFF) + (c.ffPriority === 'available' ? ' (below minimum allowed)' : '') +
+      '; stats ' + (text(c.minStats) || '0') + '-' + (text(c.maxStats) || 'any') + '; inactive ' + text(c.days) + '+ days; faction ' + text(c.faction) +
+      '; order ' + text(c.sort) + '; source ' + text(c.discovery) + '; IDs ' + (text(c.minID) || '1') + '-' + (text(c.maxID) || 'any') +
+      '; skip ' + (skips.join('/') || 'none') + '.';
+  }
   function logReport() {
     const latestWait = [...logs].reverse().find(entry => entry.kind === 'wait');
     const until = Math.max(state.cooldown, latestWait?.until || 0);
@@ -381,6 +390,7 @@
     return ['TF v' + VERSION + ' diagnostics - ' + new Date(Date.now()).toISOString(), wait,
       'Recorded TF requests in last 60s: Torn ' + recent.filter(e => e.service === 'Torn').length + ', FFScouter ' + recent.filter(e => e.service === 'FFScouter').length + '.',
       'Cache: ' + state.pool.length + ' candidates; ' + state.saved.length + ' saved; ' + state.pool.filter(e => (cachedRelease(e) || 0) > now()).length + ' waiting for known hospital/jail release.',
+      settingsLine(),
       'Latest 100 events plus 20 action summaries, newest first. Counts are TF only. Decision time excludes final diagnostic storage; pool counts are snapshots. Rejections count evaluated outcomes, not unique players. No keys, player identities or response bodies.',
       ...[...logs].reverse().map(e => new Date(e.at).toISOString() + ' | ' + e.kind +
         (e.service ? ' ' + e.service : '') + (e.operation ? ' ' + e.operation : '') +
