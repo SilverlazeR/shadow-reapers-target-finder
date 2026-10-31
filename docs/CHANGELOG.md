@@ -3,6 +3,10 @@
 Formerly Halloween Targets in `SilverlazeR/torn-company-command-center` (PRs #124, #139-#146).
 History below is preserved as written there; file paths in older entries refer to that repository.
 
+v0.5.2 adds a **Settings** line to the diagnostic report (owner request, October 31, 2026): FF
+range and priority, stat limits, inactive days, faction, order, source, ID range and skip boxes,
+so a shared log shows how the search was set up. It contains only the user's own filters.
+
 v0.5.1 adds **Send to leadership** to the Logs panel (owner request, October 31, 2026), for
 reports too long to paste in Discord.
 - **What is sent:** one tap uploads only the visible diagnostic report to
