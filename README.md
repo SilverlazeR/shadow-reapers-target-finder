@@ -31,7 +31,7 @@ do not delete the entry.
 
 | Data storage | Data sharing | Purpose | Key storage & sharing | Key access level |
 |---|---|---|---|---|
-| Only locally on your device until cleared; a log you choose to send is kept 30 days on shadowreapersfaction.com | Nobody here; FFScouter receives requested IDs under its policy; a sent log (plus your Torn name and ID only if ticked) goes to the Shadow Reapers owner | Competitive advantage: find targets | Sent only to Torn and FFScouter; saved locally only if you choose Remember | Custom: basic, battlestats, attacks, hof, profile |
+| Only locally on your device until cleared; a log you choose to send is kept 30 days on shadowreapersfaction.com | Nobody here; FFScouter receives requested IDs under its policy; a sent log, with your Torn ID and name, goes to the Shadow Reapers owner | Competitive advantage: find targets | Sent only to Torn and FFScouter; saved locally only if you choose Remember | Custom: basic, battlestats, attacks, hof, profile |
 
 ## Development
 
