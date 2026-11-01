@@ -3,6 +3,14 @@
 Formerly Halloween Targets in `SilverlazeR/torn-company-command-center` (PRs #124, #139-#146).
 History below is preserved as written there; file paths in older entries refer to that repository.
 
+v0.5.4 writes to device storage less often during a search (owner request, October 31, 2026).
+Owner logs showed about 44 full-cache writes and 4 seconds of storage time per 20-check tap. The
+safety write before each Torn check stays; the write after each check (and after estimate
+lookups) is now made at most every 5 seconds, since the next safety write carries it. Opening a
+target and the end of every action still save immediately. A full tap drops from 45 to 25 writes.
+Torn request spacing is now 1.15s (was 1.25s): at most 52 profile checks a minute, leaving 48 of
+Torn's 100 for other tools. A full 20-check tap takes about 23 seconds of spacing instead of 25.
+
 v0.5.3 fixes three code-review items (owner request, October 31, 2026).
 - **Torn rules:** the data-use table now sits open directly above the key field instead of inside a
   collapsed section, so it is clearly visible where the key is entered. Data Sharing mentions Send

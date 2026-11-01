@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shadow Reapers Target Finder
 // @namespace    https://shadowreapersfaction.com
-// @version      0.5.3
+// @version      0.5.4
 // @downloadURL  https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @updateURL    https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @description  Tap TF to open your next matching target; estimated stats, inactivity, faction and fair-fight filters.
@@ -48,8 +48,8 @@
     logEvent('summary', { action: trace.action, result, ms: Math.max(0, Date.now() - trace.at), counts: trace.counts });
   }
   const CACHE_LIMIT = 1000;
-  // At most 48 TF profile checks a minute, leaving 52 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.3', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600;
+  // At most 52 TF profile checks a minute, leaving 48 of Torn's shared 100 for other tools.
+  const TORN_GAP = 1150, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.4', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
@@ -291,12 +291,17 @@
     if (name === KEY || name === LEGACY_BSP_KEY) { if (value) throw Error('This manager cannot remember keys securely. Leave Remember key unchecked.'); return; }
     localStorage.setItem(name, value);
   }
+  let lastSaveAt = 0;
   async function save() {
     // Timed so logs show how much of a slow tap is spent writing to the device.
     const started = Date.now(), trace = activeTrace;
-    try { await writeStorage(STORE, JSON.stringify(state)); }
+    try { await writeStorage(STORE, JSON.stringify(state)); lastSaveAt = Date.now(); }
     finally { countTrace('storageWrites', 1, trace); countTrace('storageMs', Date.now() - started, trace); }
   }
+  // Per-candidate search progress is written at most every few seconds; each
+  // write rewrites the whole cache. Every action still saves when it ends and
+  // before opening a target, so a closed page loses only recent cache checks.
+  async function saveSoon() { if (Date.now() - lastSaveAt >= SAVE_EVERY_MS) await save(); }
   // Diagnostics deliberately contain no free-form provider text, URLs, keys,
   // target IDs/names or profile data. Apply the same allowlist on storage reload.
   function cleanLog(entry) {
@@ -702,7 +707,7 @@
       const ff = numeric(estimate?.fair_fight) !== null && estimate.fair_fight >= 1 ? estimate.fair_fight : null;
       // A refresh without a new estimate keeps the dated older one.
       if (!refresh || stats !== null && ff !== null) { row.stats = stats; row.ff = ff; row.estimatedAt = numeric(estimate?.last_updated); }
-      row.fetchedAt = now(); await save();
+      row.fetchedAt = now(); await saveSoon();
     }
   }
   function scanID(scan) { return scan.min + (scan.offset + scan.cursor) % (scan.max - scan.min + 1); }
@@ -775,9 +780,9 @@
       // Its independent fallback should spend requests only on genuinely new IDs.
       const knownPoolID = state.config.discovery === 'auto' && state.pool.some(row => row.id === id);
       if (id === state.owner || state.used.includes(id) || state.rows.some(row => row.id === id) || awaitingRelease || knownPoolID) { state.scan.cursor++; continue; }
-      // Persist a run of local skips once before the next request, rather than
-      // rewriting the entire 1,000-target cache for every skipped ID.
-      await save(); ensure(run);
+      // Persist a run of local skips before the next request at most every few
+      // seconds, rather than rewriting the entire 1,000-target cache each time.
+      await saveSoon(); ensure(run);
       tell('Checking new Torn ID ' + id + ' (' + (checked + 1) + '/100 max). ' + ready().length + ' matches. ' + searchDetails());
       progressLabel = String(checked + 1); paintButton();
       countTrace('newIDChecks');
@@ -787,12 +792,12 @@
       if (row !== undefined) state.checked++;
       if (row && profileMatch(row, f)) state.pending.push(row);
       else if (row !== undefined) searchOutcome(row, f, true);
-      await save(); await checkBackendErrors();
+      await saveSoon(); await checkBackendErrors();
       // Finish this candidate before advancing, including the tenth profile.
       if (state.pending.length) {
         await enrich(state.pending[0], run); ensure(run);
         searchOutcome(state.pending[0], f);
-        const completed = state.pending.shift(); state.rows.push(completed); rememberTarget(completed); await save(); render();
+        const completed = state.pending.shift(); state.rows.push(completed); rememberTarget(completed); await saveSoon(); render();
         // Only a fresh profile obtained in this invocation can take the fast
         // path. A pending/queued profile from another tap still needs a check.
         if (fresh && matches(completed, f)) return completed;
@@ -831,14 +836,14 @@
       if (!updated) {
         state.pending.shift();
         if (updated !== undefined) { state.checked++; searchOutcome(null, f); }
-        await save(); await checkBackendErrors(); continue;
+        await saveSoon(); await checkBackendErrors(); continue;
       }
       state.pending[0] = updated;
       if (profileMatch(updated, f)) await enrich(updated, run);
       ensure(run);
       searchOutcome(updated, f);
       state.pending.shift(); state.rows.push(updated); rememberTarget(updated); state.checked++;
-      await save(); render();
+      await saveSoon(); render();
     }
     tell(ready().length + ' matching targets. ' + searchDetails() + 'Tap TF to open a match or search the next batch. Find / check more also searches further.');
   }
@@ -928,7 +933,7 @@
       state.poolFetched = now(); state.scanned += data.targets.length; batches++;
       await save(); return added;
     };
-    // A bounded tap: about 25 seconds at 1.25s spacing. Another tap continues.
+    // A bounded tap: about 23 seconds at 1.15s spacing. Another tap continues.
     while (checked < TAP_CHECKS) {
       ensure(run);
       const eligible = state.pool.filter(item => poolEligible(item, f, attempted));
@@ -966,11 +971,12 @@
       const pending = { ...row, status: 'Unverified', checkedAt: null, retryAt: now() + 60 };
       keepPool(pending); rememberTarget(pending);
       state.rows = state.rows.filter(item => item.id !== row.id);
+      // Always persisted: this write also carries the previous check's result.
       await save(); ensure(run);
       const updated = await scoutProfile(pending, run, true); ensure(run);
       if (!updated) {
         if (updated === null) keepPool({ ...pending, status: 'Unavailable', retryAt: now() + 300 });
-        await save(); await checkBackendErrors(); continue;
+        await saveSoon(); await checkBackendErrors(); continue;
       }
       state.checked++;
       if (profileMatch(updated, f)) await enrich(updated, run);
@@ -985,7 +991,8 @@
         if (state.rows.length >= CACHE_LIMIT) state.rows.shift();
         state.rows.push(updated);
       }
-      await save(); ensure(run);
+      if (okay) await save(); else await saveSoon();
+      ensure(run);
       if (okay) return updated;
     }
     if (checked >= TAP_CHECKS) {

@@ -18,7 +18,7 @@ do not delete the entry.
 
 ## How it works
 
-- **One target per tap:** one trusted tap checks candidates (Torn API `profile`, paced 1.25s
+- **One target per tap:** one trusted tap checks candidates (Torn API `profile`, paced 1.15s
   apart) and opens **one** native attack page. It never clicks attack controls.
 - **Bounded taps:** a tap stops after 20 checks and shows **0**; tap again to continue.
 - **Candidates:** they come from FFScouter. The default order is *most likely available first*.
