@@ -48,8 +48,8 @@
     logEvent('summary', { action: trace.action, result, ms: Math.max(0, Date.now() - trace.at), counts: trace.counts });
   }
   const CACHE_LIMIT = 1000;
-  // At most 48 TF profile checks a minute, leaving 52 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1250, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.4', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
+  // At most 52 TF profile checks a minute, leaving 48 of Torn's shared 100 for other tools.
+  const TORN_GAP = 1150, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.4', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
@@ -933,7 +933,7 @@
       state.poolFetched = now(); state.scanned += data.targets.length; batches++;
       await save(); return added;
     };
-    // A bounded tap: about 25 seconds at 1.25s spacing. Another tap continues.
+    // A bounded tap: about 23 seconds at 1.15s spacing. Another tap continues.
     while (checked < TAP_CHECKS) {
       ensure(run);
       const eligible = state.pool.filter(item => poolEligible(item, f, attempted));

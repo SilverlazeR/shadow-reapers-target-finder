@@ -1010,7 +1010,7 @@ test('automatic TF stops a fruitless tap after 20 checks, honors pacing, and nev
   assert.equal(summary.counts.tapLimitReached, 1); assert.equal(summary.counts.earlyBatches, 3); assert.equal(summary.counts.rejectedHospital, 20);
   // One safety write before each check; results after checks are batched (was 44 writes).
   assert.ok(summary.counts.storageWrites <= 30, 'storage writes: ' + summary.counts.storageWrites);
-  assert.ok(f.h.getState().nextTorn >= NOW * 1000 + 19 * 1250, '1.25-second Torn request spacing is retained');
+  assert.ok(f.h.getState().nextTorn >= NOW * 1000 + 19 * 1150, '1.15-second Torn request spacing is retained');
   const count = f.requests.length; f.advance(600000); await settle(); assert.equal(f.requests.length, count);
 });
 
@@ -1631,7 +1631,7 @@ test('Find target and maintenance controls retain specific diagnostic action lab
   assert.match(f.h.logReport(), /done forget key/); assert.ok(!f.store[LOG_STORE].includes(TEST_KEY));
 });
 
-test('Torn checks are paced 1.25 seconds apart without a separate save before each request', async () => {
+test('Torn checks are paced 1.15 seconds apart without a separate save before each request', async () => {
   let f, before = null;
   f = await fixture({ discovery: 'auto', respond: url => {
     if (url.pathname === '/user/103') before = f.writes.filter(w => w.k === STORE).map(w => JSON.parse(w.v));
@@ -1642,8 +1642,8 @@ test('Torn checks are paced 1.25 seconds apart without a separate save before ea
   await f.click('TF'); assert.match(f.navigations[0], /user2ID=103$/);
   const unverified = before.filter(s => s.pool.find(row => row.id === 103)?.status === 'Unverified');
   assert.equal(unverified.length, 1, 'Only the safety invalidation is written before the check');
-  assert.ok(JSON.parse(f.store[STORE]).nextTorn >= NOW * 1000 + 1250, 'Spacing is saved before navigating');
-  assert.ok(JSON.parse(f.store[STORE]).nextTorn <= NOW * 1000 + 2 * 1250 + 100, 'Connect check plus one paced check');
+  assert.ok(JSON.parse(f.store[STORE]).nextTorn >= NOW * 1000 + 1150, 'Spacing is saved before navigating');
+  assert.ok(JSON.parse(f.store[STORE]).nextTorn <= NOW * 1000 + 2 * 1150 + 100, 'Connect check plus one paced check');
 });
 
 test('newer provider estimates refresh cached candidates without losing profile evidence; older ones are ignored', async () => {
