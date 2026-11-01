@@ -3,6 +3,12 @@
 Formerly Halloween Targets in `SilverlazeR/torn-company-command-center` (PRs #124, #139-#146).
 History below is preserved as written there; file paths in older entries refer to that repository.
 
+v0.5.6 fills in a missing sender name (owner request, November 1, 2026). Players who connected
+before v0.5.1 had their Torn ID saved but not their name, so their logs arrived as "Name not sent".
+On the first **Send to leadership** tap, TF makes one paced Torn profile check of the key's own
+owner and saves the name; later sends make no extra request. It is skipped while a search is
+running, and any failure still sends the log with the ID only.
+
 v0.5.5 always includes the sender's Torn ID and name with **Send to leadership** (owner request,
 October 31, 2026). The opt-in box is removed; the note beside the button and the data-use table
 say so. The key is still never sent, and nothing is uploaded without the tap.
