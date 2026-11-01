@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shadow Reapers Target Finder
 // @namespace    https://shadowreapersfaction.com
-// @version      0.5.5
+// @version      0.5.6
 // @downloadURL  https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @updateURL    https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @description  Tap TF to open your next matching target; estimated stats, inactivity, faction and fair-fight filters.
@@ -49,7 +49,7 @@
   }
   const CACHE_LIMIT = 1000;
   // At most 52 TF profile checks a minute, leaving 48 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1150, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.5', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
+  const TORN_GAP = 1150, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.6', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
@@ -367,17 +367,29 @@
     } finally { logWriting = false; renderLogs(); }
   }
   function tornName(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(value) ? value : ''; }
+  // Players who connected before v0.5.1 have an ID but no saved name. One
+  // paced Torn profile check of the key's own owner fills it in, once, when
+  // nothing else is running. Any failure just sends the ID without a name.
+  async function fillOwnerName() {
+    if (state.ownerName || !positiveID(state.owner) || !apiKey || busy) return;
+    const run = generation;
+    try {
+      const owner = await request(profileURL(apiKey), run, 'Torn');
+      if (owner?.player_id === state.owner && tornName(owner.name)) { state.ownerName = tornName(owner.name); await save(); }
+    } catch {}
+  }
   // Sends only the visible report, and only on a deliberate tap. The key is
-  // never included; the Torn name/ID are added only when the box is ticked.
+  // never included.
   async function sendLogs(event) {
     if (!event.isTrusted || !active() || logSending) return;
-    const report = logReport(); logText.value = report;
-    const body = { script: 'target-finder', log: report, note: 'Sent from Target Finder v' + VERSION };
-    // The sender's own Torn ID (and name) is always included so leadership
-    // knows whose log it is; the notice beside the button says so.
-    if (positiveID(state.owner)) body.sender = { id: state.owner, ...(state.ownerName ? { name: state.ownerName } : {}) };
     logSending = true; logHint.textContent = 'Sending to Shadow Reapers leadership...';
     try {
+      await fillOwnerName();
+      const report = logReport(); logText.value = report;
+      const body = { script: 'target-finder', log: report, note: 'Sent from Target Finder v' + VERSION };
+      // The sender's own Torn ID (and name) is always included so leadership
+      // knows whose log it is; the notice beside the button says so.
+      if (positiveID(state.owner)) body.sender = { id: state.owner, ...(state.ownerName ? { name: state.ownerName } : {}) };
       const response = await new Promise((resolve, reject) => {
         const headers = { Accept: 'application/json', 'Content-Type': 'application/json' }, data = JSON.stringify(body);
         const timer = setTimeout(() => reject(Error('timeout')), 20000);
