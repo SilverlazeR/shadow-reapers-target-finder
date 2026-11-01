@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Shadow Reapers Target Finder
 // @namespace    https://shadowreapersfaction.com
-// @version      0.5.4
+// @version      0.5.5
 // @downloadURL  https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @updateURL    https://raw.githubusercontent.com/SilverlazeR/shadow-reapers-target-finder/main/shadow-reapers-target-finder.user.js
 // @description  Tap TF to open your next matching target; estimated stats, inactivity, faction and fair-fight filters.
@@ -30,7 +30,7 @@
   const SEARCH_BUDGET = 'sr_halloween_search_budget_v1';
   const LOG_STORE = 'sr_halloween_logs_v1', LOG_LIMIT = 100;
   const LOG_UPLOAD = 'https://shadowreapersfaction.com/api/public/script-logs';
-  let logs = [], logPanel, logText, logHint, logIdentity, logSending = false, logStorageError = false, logWriting = false, pendingLogSnapshot = null;
+  let logs = [], logPanel, logText, logHint, logSending = false, logStorageError = false, logWriting = false, pendingLogSnapshot = null;
   let logEpoch = 0;
   let activeTrace = null;
   const TRACE_COUNTS = ['tornRequests', 'ffRequests', 'networkMs', 'pacingMs', 'cachedChecks', 'newCandidateChecks', 'newIDChecks',
@@ -49,7 +49,7 @@
   }
   const CACHE_LIMIT = 1000;
   // At most 52 TF profile checks a minute, leaving 48 of Torn's shared 100 for other tools.
-  const TORN_GAP = 1150, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.4', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
+  const TORN_GAP = 1150, ESTIMATE_TTL = 7 * DAY, VERSION = '0.5.5', MISS_REFRESH = 3, TAP_CHECKS = 20, DEFER_SECONDS = 3600, SAVE_EVERY_MS = 5000;
   const DEFAULTS = { minStats: '', maxStats: '', days: '365', faction: 'any', minFF: '2', maxFF: '3', ffPriority: 'strict', discovery: 'auto', minID: '1', maxID: '', sort: 'available',
     skipFederal: '1', skipTravel: '1', skipFallen: '1' };
   const SKIP_KEYS = ['skipFederal', 'skipTravel', 'skipFallen'];
@@ -373,7 +373,9 @@
     if (!event.isTrusted || !active() || logSending) return;
     const report = logReport(); logText.value = report;
     const body = { script: 'target-finder', log: report, note: 'Sent from Target Finder v' + VERSION };
-    if (logIdentity.checked && positiveID(state.owner)) body.sender = { id: state.owner, ...(state.ownerName ? { name: state.ownerName } : {}) };
+    // The sender's own Torn ID (and name) is always included so leadership
+    // knows whose log it is; the notice beside the button says so.
+    if (positiveID(state.owner)) body.sender = { id: state.owner, ...(state.ownerName ? { name: state.ownerName } : {}) };
     logSending = true; logHint.textContent = 'Sending to Shadow Reapers leadership...';
     try {
       const response = await new Promise((resolve, reject) => {
@@ -1204,7 +1206,7 @@
       .dock button[data-working=true]{background:#75521b;border-color:#ffd08a}
       .dock button.logs-button{min-height:24px;font-size:9px;line-height:16px;background:#34302c}
       .diagnostics{position:fixed;z-index:2;right:max(6px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));width:min(440px,calc(100vw - 12px));max-height:calc(100dvh - 130px - env(safe-area-inset-bottom));overflow:auto;background:#191919;border:1px solid #98633b;border-radius:10px;padding:12px;box-shadow:0 8px 40px #000b}
-      .diagnostics .send-identity{display:flex;align-items:center;gap:8px;min-height:40px}.diagnostics .send-note{font-size:12px;color:#c7beb7}
+      .diagnostics .send-note{font-size:12px;color:#c7beb7}
       .diagnostics textarea{display:block;box-sizing:border-box;width:100%;height:min(300px,40dvh);background:#202020;color:#f3f3f3;border:1px solid #777;border-radius:5px;padding:8px;font:12px/1.5 monospace;white-space:pre-wrap;overflow-wrap:anywhere;resize:vertical}
       .panel{position:fixed;right:max(6px,env(safe-area-inset-right));top:max(8px,env(safe-area-inset-top));width:min(440px,calc(100vw - 12px));max-height:calc(100dvh - 120px - env(safe-area-inset-bottom));overflow:auto;overscroll-behavior:contain;background:#191919;border:1px solid #98633b;border-radius:10px;padding:12px;box-shadow:0 8px 40px #000b}
       .profile-panel{position:static;width:100%;max-width:750px;max-height:none;margin:8px 0;box-shadow:none}
@@ -1241,10 +1243,7 @@
       if (!event.isTrusted || !active()) return;
       logEpoch++; logs = []; void flushLogs(); renderLogs();
     });
-    const identityWrap = element('label', undefined, logPanel); identityWrap.className = 'send-identity';
-    logIdentity = element('input', undefined, identityWrap); logIdentity.type = 'checkbox';
-    identityWrap.append(document.createTextNode('Include my Torn name and ID'));
-    element('p', 'Send to leadership uploads only this report to shadowreapersfaction.com, where only the Shadow Reapers owner can read it. It is deleted after 30 days. Your key is never sent; your name and ID only if ticked.', logPanel).className = 'send-note';
+    element('p', 'Send to leadership uploads this report with your Torn ID and name to shadowreapersfaction.com, where only the Shadow Reapers owner can read it. It is deleted after 30 days. Your key is never sent.', logPanel).className = 'send-note';
     panel = element('section', undefined, root); panel.className = 'panel'; panel.hidden = true; panel.setAttribute('aria-label', 'target finder');
     const header = element('header', undefined, panel); element('h2', 'Target finder', header);
     button('Close', header, () => { showPanel(false); });
@@ -1275,7 +1274,7 @@
     const table = element('table', undefined, account);
     for (const [label, value] of [
       ['Data Storage', 'This script: filters, estimates, profile checks, up to 1,000 saved targets and opened IDs stay only on your device until cleared. The latest 100 diagnostic events and 20 action summaries are also stored locally, without keys or player identities; Logs lets you copy or clear them. Saved targets survive search resets and filter changes; Clear saved targets removes that library. FFScouter separately stores your registered key and data under its linked policy.'],
-      ['Data Sharing', 'No shortlist is shared with our servers or faction. FFScouter receives requested target IDs and uses your key for its own collection; its public estimate pool is shared with other users. Only if you tap Send to leadership in Logs, that report (plus your Torn name and ID if ticked) goes to the Shadow Reapers owner and is deleted after 30 days.'],
+      ['Data Sharing', 'No shortlist is shared with our servers or faction. FFScouter receives requested target IDs and uses your key for its own collection; its public estimate pool is shared with other users. Only if you tap Send to leadership in Logs, that report and your Torn ID and name go to the Shadow Reapers owner and is deleted after 30 days.'],
       ['Purpose of Use', 'Competitive advantage: find and compare targets. Read-only API scouting, no gameplay actions or page scraping. FFScouter also uses permitted data for estimation and model training under its policy.'],
       ['Key Storage & Sharing', 'Sent to Torn and FFScouter only. Memory-only here unless Remember saves it in PDA/private userscript storage. FFScouter retains registered keys separately. Forget removes only this script\u2019s copy; revoke/pause the key in Torn or use FFScouter\u2019s removal controls to stop provider access.'],
       ['Key Access Level', 'Prefer a custom key: user basic, battlestats, attacks, hof, profile (personalstats optional for FFScouter). Limited/Full also work but grant more access. Connect checks registration and registers only after consent.']

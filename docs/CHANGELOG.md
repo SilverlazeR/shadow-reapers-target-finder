@@ -3,6 +3,10 @@
 Formerly Halloween Targets in `SilverlazeR/torn-company-command-center` (PRs #124, #139-#146).
 History below is preserved as written there; file paths in older entries refer to that repository.
 
+v0.5.5 always includes the sender's Torn ID and name with **Send to leadership** (owner request,
+October 31, 2026). The opt-in box is removed; the note beside the button and the data-use table
+say so. The key is still never sent, and nothing is uploaded without the tap.
+
 v0.5.4 writes to device storage less often during a search (owner request, October 31, 2026).
 Owner logs showed about 44 full-cache writes and 4 seconds of storage time per 20-check tap. The
 safety write before each Torn check stays; the write after each check (and after estimate
